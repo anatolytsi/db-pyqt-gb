@@ -17,10 +17,11 @@ import platform
 from pip._vendor import chardet
 
 
-def host_ping(hosts_lst: list) -> list:
+def host_ping(hosts_lst: list, need_print: bool = True) -> list:
     """
     Pings each host in the given list and returns a list with ipaddress objects and ping status.
     :param hosts_lst: list of hosts (list of strings)
+    :param need_print: enable/disable builtin print
     :return: list of tuples with first value being an ipaddress object and second being a boolean representing the
     reachability of the host.
     """
@@ -37,8 +38,9 @@ def host_ping(hosts_lst: list) -> list:
         ip = ip_address(gethostbyname(host))
         checked_hosts.append((ip, is_reachable))
         ip_str = str(ip)
-        print(f'Host {host if host == ip_str else (host + " (" + ip_str + ")")} is '
-              f'{"" if is_reachable else "un"}reachable')
+        if need_print:
+            print(f'Host {host if host == ip_str else (host + " (" + ip_str + ")")} is '
+                  f'{"" if is_reachable else "un"}reachable')
     return checked_hosts
 
 
