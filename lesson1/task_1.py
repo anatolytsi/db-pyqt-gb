@@ -14,7 +14,7 @@ from socket import gethostbyname
 from subprocess import Popen, PIPE
 import platform
 
-from pip._vendor import chardet
+import chardet
 
 
 def host_ping(hosts_lst: list, need_print: bool = True) -> list:
