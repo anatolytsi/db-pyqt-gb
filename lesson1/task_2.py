@@ -11,9 +11,10 @@ from lesson1.task_1 import host_ping
 def host_range_ping(host_range: str, need_print: bool = True) -> list:
     """
     Pings the hosts in a given range.
-    :param host_range:
-    :param need_print:
-    :return:
+    :param host_range: ip range
+    :param need_print: enable/disable builtin print
+    :return: list of tuples with first value being an ipaddress object and second being a boolean representing the
+    reachability of the host.
     """
     hosts = []
     if '/' in host_range:
