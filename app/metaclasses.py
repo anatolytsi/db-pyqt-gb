@@ -56,3 +56,10 @@ class ClientMaker(type):
         if not found_com_fcn:
             raise ValueError(f'Отсутствуют вызовы функций, работающих с сокетами')
         type.__init__(cls, name, bases, dct)
+
+    def __call__(cls, *args, **kwargs):
+        for arg in args:
+            if isinstance(arg, socket.socket):
+                if arg.family != socket.AddressFamily.AF_INET or arg.type != socket.SocketKind.SOCK_STREAM:
+                    raise ValueError(f'Сокеты должны использоваться для TCP')
+        return super().__call__(*args, **kwargs)
