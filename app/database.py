@@ -71,6 +71,28 @@ class ServerDb:
         self.session.query(self.ActiveUsers).delete()
         self.session.commit()
 
+    def get_user(self, username):
+        query_res = self.session.query(self.AllUsers.username,
+                                       self.AllUsers.first_name,
+                                       self.AllUsers.last_name,
+                                       self.AllUsers.last_login,
+                                       ).filter_by(username=username)
+        if query_res.count():
+            return query_res.first()
+        return None
+
+    def user_change_name(self, username, first_name='', last_name=''):
+        query_res = self.session.query(self.AllUsers).filter_by(username=username)
+        if query_res.count():
+            user = query_res.first()
+            if first_name:
+                user.first_name = first_name
+            if last_name:
+                user.last_name = last_name
+            if first_name or last_name:
+                self.session.add(user)
+                self.session.commit()
+
     def user_login(self, username, ip, port):
         query_res = self.session.query(self.AllUsers).filter_by(username=username)
         if query_res.count():
@@ -141,3 +163,7 @@ if __name__ == '__main__':
     print(f'История входов пользователя {username_1}')
     [print(f'\t{username}: {ip}:{port}, {time}') for username, ip, port, time in server_db.login_history(username_1)]
     print(server_db.users_list())
+    server_db.user_change_name(username_1, 'Anatolii')
+    print(server_db.get_user(username_1))
+    server_db.user_change_name(username_1, last_name='Tsirkunenko')
+    print(server_db.get_user(username_1))
