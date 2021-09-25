@@ -85,7 +85,6 @@ class ServerMaker(type):
             sock_found = False
             sock_arg_counter = 0
             for instruction in instructions:
-                print(instruction)
                 # Set a flag if any of communication functions is used
                 if instruction.opname == 'LOAD_GLOBAL':
                     if instruction.argval in com_fcn:
