@@ -2,14 +2,11 @@ import configparser
 import socket
 import os
 import argparse
-import json
-import logging
 import select
 import threading
-import time
-import logs.config_server_log
+from PyQt5.QtCore import QTimer
+from PyQt5.QtWidgets import QApplication, QMessageBox
 from app.database import ServerDb
-from errors import IncorrectDataRecivedError
 from common.variables import *
 from common.utils import *
 from decos import log
@@ -17,6 +14,8 @@ from descrptrs import Port
 from metaclasses import ServerMaker
 
 # Инициализация логирования сервера.
+from server_gui import MainWindow, HistoryWindow, ConfigWindow, gui_create_model, create_stat_model
+
 logger = logging.getLogger('server')
 
 
@@ -55,6 +54,9 @@ class Server(threading.Thread, metaclass=ServerMaker):
 
         # Конструктор предка
         super().__init__(**kwargs)
+
+        self.connected_lock = threading.Lock()
+        self.new_connection = False
 
     def init_socket(self):
         logger.info(
@@ -147,6 +149,8 @@ class Server(threading.Thread, metaclass=ServerMaker):
                 self.database.user_login(
                     message[USER][ACCOUNT_NAME], client_ip, client_port)
                 send_message(client, RESPONSE_200)
+                with self.connected_lock:
+                    self.new_connection = True
             else:
                 response = RESPONSE_400
                 response[ERROR] = 'Имя пользователя уже занято.'
@@ -170,6 +174,8 @@ class Server(threading.Thread, metaclass=ServerMaker):
             self.clients.remove(self.names[message[ACCOUNT_NAME]])
             self.names[message[ACCOUNT_NAME]].close()
             del self.names[message[ACCOUNT_NAME]]
+            with self.connected_lock:
+                self.new_connection = True
             return
 
         # Если это запрос контакт-листа
@@ -207,6 +213,73 @@ class Server(threading.Thread, metaclass=ServerMaker):
             return
 
 
+class ServerGUI:
+    def __init__(self, server: Server, config: configparser.ConfigParser):
+        self.server = server
+        self.config = config
+
+        self.server_app = QApplication(sys.argv)
+        self.main_window = MainWindow()
+        self.stat_window = None
+
+        self.main_window.statusBar().showMessage('Server Working')
+        self.main_window.active_clients_table.setModel(gui_create_model(self.server.database))
+        self.main_window.active_clients_table.resizeColumnsToContents()
+        self.main_window.active_clients_table.resizeRowsToContents()
+
+        self.main_window.refresh_button.triggered.connect(self.list_update)
+        self.main_window.show_history_button.triggered.connect(self.show_statistics)
+        self.main_window.config_btn.triggered.connect(self.server_config)
+
+        self.timer = QTimer()
+        self.timer.timeout.connect(self.list_update)
+
+    def start(self):
+        self.timer.start(1000)
+        self.server_app.exec_()
+
+    def list_update(self):
+        if self.server.new_connection:
+            self.main_window.active_clients_table.setModel(gui_create_model(self.server.database))
+            self.main_window.active_clients_table.resizeColumnsToContents()
+            self.main_window.active_clients_table.resizeRowsToContents()
+            with self.server.connected_lock:
+                self.server.new_connection = False
+
+    def show_statistics(self):
+        self.stat_window = HistoryWindow()
+        self.stat_window.history_table.setModel(create_stat_model(self.server.database))
+        self.stat_window.history_table.resizeColumnsToContents()
+        self.stat_window.history_table.resizeRowsToContents()
+        self.stat_window.show()
+
+    def server_config(self):
+        config_window = ConfigWindow()
+        config_window.db_path.insert(self.config['SETTINGS']['Database_path'])
+        config_window.db_file.insert(self.config['SETTINGS']['Database_file'])
+        config_window.port.insert(self.config['SETTINGS']['Default_port'])
+        config_window.ip.insert(self.config['SETTINGS']['Listen_Address'])
+        config_window.save_btn.clicked.connect(lambda: self.save_server_config(config_window))
+
+    def save_server_config(self, config_window):
+        message = QMessageBox()
+        self.config['SETTINGS']['Database_path'] = config_window.db_path.text()
+        self.config['SETTINGS']['Database_file'] = config_window.db_file.text()
+        try:
+            port = int(config_window.port.text())
+        except ValueError:
+            message.warning(config_window, 'Ошибка', 'Порт должен быть числом')
+        else:
+            self.config['SETTINGS']['Listen_Address'] = config_window.ip.text()
+            if 1023 < port < 65536:
+                self.config['SETTINGS']['Default_port'] = str(port)
+                with open('server.ini', 'w') as conf:
+                    self.config.write(conf)
+                    message.information(config_window, 'OK', 'Настройки успешно сохранены!')
+            else:
+                message.warning(config_window, 'Ошибка', 'Порт должен быть от 1024 до 65536')
+
+
 def main():
     config = configparser.ConfigParser()
 
@@ -223,6 +296,9 @@ def main():
     # Создание экземпляра класса - сервера.
     server = Server(listen_address, listen_port, database, daemon=True)
     server.start()
+
+    server_gui = ServerGUI(server, config)
+    server_gui.start()
 
 
 if __name__ == '__main__':

@@ -1,3 +1,5 @@
 chardet==4.0.0
+PyQt5-Qt5==5.15.2
+qt5-tools==5.15.2.1.2
 SQLAlchemy==1.4.25
 tabulate==0.8.9
