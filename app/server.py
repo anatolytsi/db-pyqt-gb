@@ -6,7 +6,7 @@ import select
 import threading
 from PyQt5.QtCore import QTimer
 from PyQt5.QtWidgets import QApplication, QMessageBox
-from app.server_database import ServerDb
+from server_database import ServerDb
 from common.variables import *
 from common.utils import *
 from decos import log
