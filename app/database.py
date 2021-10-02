@@ -43,8 +43,9 @@ class ServerDb:
             self.sent = 0
             self.received = 0
 
-    def __init__(self):
-        self.db_engine = create_engine('sqlite:///server_db.db3')
+    def __init__(self, path):
+        self.db_engine = create_engine(f'sqlite:///{path}', echo=False, pool_recycle=7200,
+                                       connect_args={'check_same_thread': False})
         self.metadata = MetaData()
 
         users_table = Table('Users', self.metadata,
@@ -238,7 +239,7 @@ if __name__ == '__main__':
     ip_2 = '192.168.1.101'
     port_2 = 7777
 
-    server_db = ServerDb()
+    server_db = ServerDb('server_db.db3')
     server_db.user_login(username_1, ip_1, port_1)
     server_db.user_login(username_2, ip_2, port_2)
     print(server_db.active_users_list())
