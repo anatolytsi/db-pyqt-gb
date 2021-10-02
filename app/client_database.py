@@ -92,7 +92,7 @@ class ClientDatabase:
             return False
 
     def check_contact(self, contact_username):
-        if self.session.query(self.Contacts).filter_by(name=contact_username).count():
+        if self.session.query(self.Contacts).filter_by(username=contact_username).count():
             return True
         else:
             return False
