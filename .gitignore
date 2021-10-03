@@ -3,3 +3,5 @@ __pycache__/
 /venv
 /app/*.db3
 /app/*.db3-journal
+/app/client/*.db3
+/app/client/*.db3-journal

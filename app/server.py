@@ -9,8 +9,8 @@ from PyQt5.QtWidgets import QApplication, QMessageBox
 from server_database import ServerDb
 from common.variables import *
 from common.utils import *
-from decos import log
-from descrptrs import Port
+from common.decos import log
+from common.descrptrs import Port
 from metaclasses import ServerMaker
 
 # Инициализация логирования сервера.
