@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" >
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>client.transport &mdash; Messenger 0.0.1 documentation</title>
+      <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+      <link rel="stylesheet" href="../../_static/css/theme.css" type="text/css" />
+  <!--[if lt IE 9]>
+    <script src="../../_static/js/html5shiv.min.js"></script>
+  <![endif]-->
+  
+        <script data-url_root="../../" id="documentation_options" src="../../_static/documentation_options.js"></script>
+        <script src="../../_static/jquery.js"></script>
+        <script src="../../_static/underscore.js"></script>
+        <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+            <a href="../../index.html" class="icon icon-home"> Messenger
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <!-- Local TOC -->
+              <div class="local-toc"></div>
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../index.html">Messenger</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../index.html" class="icon icon-home"></a> &raquo;</li>
+          <li><a href="../index.html">Module code</a> &raquo;</li>
+      <li>client.transport</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for client.transport</h1><div class="highlight"><pre>
+<span></span><span class="kn">import</span> <span class="nn">socket</span>
+<span class="kn">import</span> <span class="nn">sys</span>
+<span class="kn">import</span> <span class="nn">time</span>
+<span class="kn">import</span> <span class="nn">logging</span>
+<span class="kn">import</span> <span class="nn">json</span>
+<span class="kn">import</span> <span class="nn">threading</span>
+<span class="kn">import</span> <span class="nn">hashlib</span>
+<span class="kn">import</span> <span class="nn">hmac</span>
+<span class="kn">import</span> <span class="nn">binascii</span>
+<span class="kn">from</span> <span class="nn">PyQt5.QtCore</span> <span class="kn">import</span> <span class="n">pyqtSignal</span><span class="p">,</span> <span class="n">QObject</span>
+
+<span class="n">sys</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="s1">&#39;../&#39;</span><span class="p">)</span>
+<span class="kn">from</span> <span class="nn">common.utils</span> <span class="kn">import</span> <span class="o">*</span>
+<span class="kn">from</span> <span class="nn">common.variables</span> <span class="kn">import</span> <span class="o">*</span>
+<span class="kn">from</span> <span class="nn">common.errors</span> <span class="kn">import</span> <span class="n">ServerError</span>
+
+<span class="c1"># Логер и объект блокировки для работы с сокетом.</span>
+<span class="n">logger</span> <span class="o">=</span> <span class="n">logging</span><span class="o">.</span><span class="n">getLogger</span><span class="p">(</span><span class="s1">&#39;client&#39;</span><span class="p">)</span>
+<span class="n">socket_lock</span> <span class="o">=</span> <span class="n">threading</span><span class="o">.</span><span class="n">Lock</span><span class="p">()</span>
+
+
+<div class="viewcode-block" id="ClientTransport"><a class="viewcode-back" href="../../client.html#client.transport.ClientTransport">[docs]</a><span class="k">class</span> <span class="nc">ClientTransport</span><span class="p">(</span><span class="n">threading</span><span class="o">.</span><span class="n">Thread</span><span class="p">,</span> <span class="n">QObject</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Класс реализующий транспортную подсистему клиентского</span>
+<span class="sd">    модуля. Отвечает за взаимодействие с сервером.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">new_message</span> <span class="o">=</span> <span class="n">pyqtSignal</span><span class="p">(</span><span class="nb">dict</span><span class="p">)</span>
+    <span class="n">message_205</span> <span class="o">=</span> <span class="n">pyqtSignal</span><span class="p">()</span>
+    <span class="n">connection_lost</span> <span class="o">=</span> <span class="n">pyqtSignal</span><span class="p">()</span>
+
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">port</span><span class="p">,</span> <span class="n">ip_address</span><span class="p">,</span> <span class="n">database</span><span class="p">,</span> <span class="n">username</span><span class="p">,</span> <span class="n">passwd</span><span class="p">,</span> <span class="n">keys</span><span class="p">):</span>
+        <span class="c1"># Вызываем конструкторы предков</span>
+        <span class="n">threading</span><span class="o">.</span><span class="n">Thread</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span>
+        <span class="n">QObject</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span>
+
+        <span class="c1"># Класс База данных - работа с базой</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">database</span> <span class="o">=</span> <span class="n">database</span>
+        <span class="c1"># Имя пользователя</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">username</span> <span class="o">=</span> <span class="n">username</span>
+        <span class="c1"># Пароль</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">password</span> <span class="o">=</span> <span class="n">passwd</span>
+        <span class="c1"># Сокет для работы с сервером</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">transport</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="c1"># Набор ключей для шифрования</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">keys</span> <span class="o">=</span> <span class="n">keys</span>
+        <span class="c1"># Устанавливаем соединение:</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">connection_init</span><span class="p">(</span><span class="n">port</span><span class="p">,</span> <span class="n">ip_address</span><span class="p">)</span>
+        <span class="c1"># Обновляем таблицы известных пользователей и контактов</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">user_list_update</span><span class="p">()</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">contacts_list_update</span><span class="p">()</span>
+        <span class="k">except</span> <span class="ne">OSError</span> <span class="k">as</span> <span class="n">err</span><span class="p">:</span>
+            <span class="k">if</span> <span class="n">err</span><span class="o">.</span><span class="n">errno</span><span class="p">:</span>
+                <span class="n">logger</span><span class="o">.</span><span class="n">critical</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;Потеряно соединение с сервером.&#39;</span><span class="p">)</span>
+                <span class="k">raise</span> <span class="n">ServerError</span><span class="p">(</span><span class="s1">&#39;Потеряно соединение с сервером!&#39;</span><span class="p">)</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="s1">&#39;Timeout соединения при обновлении списков пользователей.&#39;</span><span class="p">)</span>
+        <span class="k">except</span> <span class="n">json</span><span class="o">.</span><span class="n">JSONDecodeError</span><span class="p">:</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">critical</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;Потеряно соединение с сервером.&#39;</span><span class="p">)</span>
+            <span class="k">raise</span> <span class="n">ServerError</span><span class="p">(</span><span class="s1">&#39;Потеряно соединение с сервером!&#39;</span><span class="p">)</span>
+            <span class="c1"># Флаг продолжения работы транспорта.</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">running</span> <span class="o">=</span> <span class="kc">True</span>
+
+<div class="viewcode-block" id="ClientTransport.connection_init"><a class="viewcode-back" href="../../client.html#client.transport.ClientTransport.connection_init">[docs]</a>    <span class="k">def</span> <span class="nf">connection_init</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">port</span><span class="p">,</span> <span class="n">ip</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Метод отвечающий за устанновку соединения с сервером.&quot;&quot;&quot;</span>
+        <span class="c1"># Инициализация сокета и сообщение серверу о нашем появлении</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">transport</span> <span class="o">=</span> <span class="n">socket</span><span class="o">.</span><span class="n">socket</span><span class="p">(</span><span class="n">socket</span><span class="o">.</span><span class="n">AF_INET</span><span class="p">,</span> <span class="n">socket</span><span class="o">.</span><span class="n">SOCK_STREAM</span><span class="p">)</span>
+
+        <span class="c1"># Таймаут необходим для освобождения сокета.</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">transport</span><span class="o">.</span><span class="n">settimeout</span><span class="p">(</span><span class="mi">5</span><span class="p">)</span>
+
+        <span class="c1"># Соединяемся, 5 попыток соединения, флаг успеха ставим в True если удалось</span>
+        <span class="n">connected</span> <span class="o">=</span> <span class="kc">False</span>
+        <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">5</span><span class="p">):</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;Попытка подключения №</span><span class="si">{</span><span class="n">i</span> <span class="o">+</span> <span class="mi">1</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">transport</span><span class="o">.</span><span class="n">connect</span><span class="p">((</span><span class="n">ip</span><span class="p">,</span> <span class="n">port</span><span class="p">))</span>
+            <span class="k">except</span> <span class="p">(</span><span class="ne">OSError</span><span class="p">,</span> <span class="ne">ConnectionRefusedError</span><span class="p">):</span>
+                <span class="k">pass</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">connected</span> <span class="o">=</span> <span class="kc">True</span>
+                <span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s2">&quot;Connection established.&quot;</span><span class="p">)</span>
+                <span class="k">break</span>
+            <span class="n">time</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
+
+        <span class="c1"># Если соединится не удалось - исключение</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">connected</span><span class="p">:</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">critical</span><span class="p">(</span><span class="s1">&#39;Не удалось установить соединение с сервером&#39;</span><span class="p">)</span>
+            <span class="k">raise</span> <span class="n">ServerError</span><span class="p">(</span><span class="s1">&#39;Не удалось установить соединение с сервером&#39;</span><span class="p">)</span>
+
+        <span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s1">&#39;Установлено соединение с сервером&#39;</span><span class="p">)</span>
+
+        <span class="c1"># Запускаем процедуру авторизации</span>
+        <span class="c1"># Получаем хэш пароля</span>
+        <span class="n">passwd_bytes</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">password</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="s1">&#39;utf-8&#39;</span><span class="p">)</span>
+        <span class="n">salt</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">username</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="s1">&#39;utf-8&#39;</span><span class="p">)</span>
+        <span class="n">passwd_hash</span> <span class="o">=</span> <span class="n">hashlib</span><span class="o">.</span><span class="n">pbkdf2_hmac</span><span class="p">(</span><span class="s1">&#39;sha512&#39;</span><span class="p">,</span> <span class="n">passwd_bytes</span><span class="p">,</span> <span class="n">salt</span><span class="p">,</span> <span class="mi">10000</span><span class="p">)</span>
+        <span class="n">passwd_hash_string</span> <span class="o">=</span> <span class="n">binascii</span><span class="o">.</span><span class="n">hexlify</span><span class="p">(</span><span class="n">passwd_hash</span><span class="p">)</span>
+
+        <span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;Passwd hash ready: </span><span class="si">{</span><span class="n">passwd_hash_string</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
+
+        <span class="c1"># Получаем публичный ключ и декодируем его из байтов</span>
+        <span class="n">pubkey</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">keys</span><span class="o">.</span><span class="n">publickey</span><span class="p">()</span><span class="o">.</span><span class="n">export_key</span><span class="p">()</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="s1">&#39;ascii&#39;</span><span class="p">)</span>
+
+        <span class="c1"># Авторизируемся на сервере</span>
+        <span class="k">with</span> <span class="n">socket_lock</span><span class="p">:</span>
+            <span class="n">presense</span> <span class="o">=</span> <span class="p">{</span>
+                <span class="n">ACTION</span><span class="p">:</span> <span class="n">PRESENCE</span><span class="p">,</span>
+                <span class="n">TIME</span><span class="p">:</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">(),</span>
+                <span class="n">USER</span><span class="p">:</span> <span class="p">{</span>
+                    <span class="n">ACCOUNT_NAME</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">username</span><span class="p">,</span>
+                    <span class="n">PUBLIC_KEY</span><span class="p">:</span> <span class="n">pubkey</span>
+                <span class="p">}</span>
+            <span class="p">}</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Presense message = </span><span class="si">{</span><span class="n">presense</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+            <span class="c1"># Отправляем серверу приветственное сообщение.</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="n">send_message</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">transport</span><span class="p">,</span> <span class="n">presense</span><span class="p">)</span>
+                <span class="n">ans</span> <span class="o">=</span> <span class="n">get_message</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">transport</span><span class="p">)</span>
+                <span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;Server response = </span><span class="si">{</span><span class="n">ans</span><span class="si">}</span><span class="s1">.&#39;</span><span class="p">)</span>
+                <span class="c1"># Если сервер вернул ошибку, бросаем исключение.</span>
+                <span class="k">if</span> <span class="n">RESPONSE</span> <span class="ow">in</span> <span class="n">ans</span><span class="p">:</span>
+                    <span class="k">if</span> <span class="n">ans</span><span class="p">[</span><span class="n">RESPONSE</span><span class="p">]</span> <span class="o">==</span> <span class="mi">400</span><span class="p">:</span>
+                        <span class="k">raise</span> <span class="n">ServerError</span><span class="p">(</span><span class="n">ans</span><span class="p">[</span><span class="n">ERROR</span><span class="p">])</span>
+                    <span class="k">elif</span> <span class="n">ans</span><span class="p">[</span><span class="n">RESPONSE</span><span class="p">]</span> <span class="o">==</span> <span class="mi">511</span><span class="p">:</span>
+                        <span class="c1"># Если всё нормально, то продолжаем процедуру</span>
+                        <span class="c1"># авторизации.</span>
+                        <span class="n">ans_data</span> <span class="o">=</span> <span class="n">ans</span><span class="p">[</span><span class="n">DATA</span><span class="p">]</span>
+                        <span class="nb">hash</span> <span class="o">=</span> <span class="n">hmac</span><span class="o">.</span><span class="n">new</span><span class="p">(</span><span class="n">passwd_hash_string</span><span class="p">,</span> <span class="n">ans_data</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="s1">&#39;utf-8&#39;</span><span class="p">),</span> <span class="s1">&#39;MD5&#39;</span><span class="p">)</span>
+                        <span class="n">digest</span> <span class="o">=</span> <span class="nb">hash</span><span class="o">.</span><span class="n">digest</span><span class="p">()</span>
+                        <span class="n">my_ans</span> <span class="o">=</span> <span class="n">RESPONSE_511</span>
+                        <span class="n">my_ans</span><span class="p">[</span><span class="n">DATA</span><span class="p">]</span> <span class="o">=</span> <span class="n">binascii</span><span class="o">.</span><span class="n">b2a_base64</span><span class="p">(</span>
+                            <span class="n">digest</span><span class="p">)</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="s1">&#39;ascii&#39;</span><span class="p">)</span>
+                        <span class="n">send_message</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">transport</span><span class="p">,</span> <span class="n">my_ans</span><span class="p">)</span>
+                        <span class="bp">self</span><span class="o">.</span><span class="n">process_server_ans</span><span class="p">(</span><span class="n">get_message</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">transport</span><span class="p">))</span>
+            <span class="k">except</span> <span class="p">(</span><span class="ne">OSError</span><span class="p">,</span> <span class="n">json</span><span class="o">.</span><span class="n">JSONDecodeError</span><span class="p">)</span> <span class="k">as</span> <span class="n">err</span><span class="p">:</span>
+                <span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;Connection error.&#39;</span><span class="p">,</span> <span class="n">exc_info</span><span class="o">=</span><span class="n">err</span><span class="p">)</span>
+                <span class="k">raise</span> <span class="n">ServerError</span><span class="p">(</span><span class="s1">&#39;Сбой соединения в процессе авторизации.&#39;</span><span class="p">)</span></div>
+
+    <span class="c1"># Функция, генерирующая приветственное сообщение для сервера</span>
+<div class="viewcode-block" id="ClientTransport.create_presence"><a class="viewcode-back" href="../../client.html#client.transport.ClientTransport.create_presence">[docs]</a>    <span class="k">def</span> <span class="nf">create_presence</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Метод генерации приветственного сообщения для сервера&quot;&quot;&quot;</span>
+        <span class="n">out</span> <span class="o">=</span> <span class="p">{</span>
+            <span class="n">ACTION</span><span class="p">:</span> <span class="n">PRESENCE</span><span class="p">,</span>
+            <span class="n">TIME</span><span class="p">:</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">(),</span>
+            <span class="n">USER</span><span class="p">:</span> <span class="p">{</span>
+                <span class="n">ACCOUNT_NAME</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">username</span>
+            <span class="p">}</span>
+        <span class="p">}</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;Сформировано </span><span class="si">{</span><span class="n">PRESENCE</span><span class="si">}</span><span class="s1"> сообщение для пользователя </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">username</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">out</span></div>
+
+<div class="viewcode-block" id="ClientTransport.process_server_ans"><a class="viewcode-back" href="../../client.html#client.transport.ClientTransport.process_server_ans">[docs]</a>    <span class="k">def</span> <span class="nf">process_server_ans</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">message</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Метод обработчик поступающих сообщений с сервера.&quot;&quot;&quot;</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;Разбор сообщения от сервера: </span><span class="si">{</span><span class="n">message</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
+
+        <span class="c1"># Если это подтверждение чего-либо</span>
+        <span class="k">if</span> <span class="n">RESPONSE</span> <span class="ow">in</span> <span class="n">message</span><span class="p">:</span>
+            <span class="k">if</span> <span class="n">message</span><span class="p">[</span><span class="n">RESPONSE</span><span class="p">]</span> <span class="o">==</span> <span class="mi">200</span><span class="p">:</span>
+                <span class="k">return</span>
+            <span class="k">elif</span> <span class="n">message</span><span class="p">[</span><span class="n">RESPONSE</span><span class="p">]</span> <span class="o">==</span> <span class="mi">400</span><span class="p">:</span>
+                <span class="k">raise</span> <span class="n">ServerError</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">message</span><span class="p">[</span><span class="n">ERROR</span><span class="p">]</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
+            <span class="k">elif</span> <span class="n">message</span><span class="p">[</span><span class="n">RESPONSE</span><span class="p">]</span> <span class="o">==</span> <span class="mi">205</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">user_list_update</span><span class="p">()</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">contacts_list_update</span><span class="p">()</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">message_205</span><span class="o">.</span><span class="n">emit</span><span class="p">()</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;Принят неизвестный код подтверждения </span><span class="si">{</span><span class="n">message</span><span class="p">[</span><span class="n">RESPONSE</span><span class="p">]</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
+
+        <span class="k">elif</span> <span class="n">ACTION</span> <span class="ow">in</span> <span class="n">message</span> <span class="ow">and</span> <span class="n">message</span><span class="p">[</span><span class="n">ACTION</span><span class="p">]</span> <span class="o">==</span> <span class="n">MESSAGE</span> <span class="ow">and</span> <span class="n">SENDER</span> <span class="ow">in</span> <span class="n">message</span> <span class="ow">and</span> <span class="n">DESTINATION</span> <span class="ow">in</span> <span class="n">message</span> \
+                <span class="ow">and</span> <span class="n">MESSAGE_TEXT</span> <span class="ow">in</span> <span class="n">message</span> <span class="ow">and</span> <span class="n">message</span><span class="p">[</span><span class="n">DESTINATION</span><span class="p">]</span> <span class="o">==</span> <span class="bp">self</span><span class="o">.</span><span class="n">username</span><span class="p">:</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;Получено сообщение от пользователя </span><span class="si">{</span><span class="n">message</span><span class="p">[</span><span class="n">SENDER</span><span class="p">]</span><span class="si">}</span><span class="s1">:</span><span class="si">{</span><span class="n">message</span><span class="p">[</span><span class="n">MESSAGE_TEXT</span><span class="p">]</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">new_message</span><span class="o">.</span><span class="n">emit</span><span class="p">(</span><span class="n">message</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="ClientTransport.contacts_list_update"><a class="viewcode-back" href="../../client.html#client.transport.ClientTransport.contacts_list_update">[docs]</a>    <span class="k">def</span> <span class="nf">contacts_list_update</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Метод обновляющий с сервера список контактов.&quot;&quot;&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">database</span><span class="o">.</span><span class="n">contacts_clear</span><span class="p">()</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;Запрос контакт листа для пользователся </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">name</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
+        <span class="n">req</span> <span class="o">=</span> <span class="p">{</span>
+            <span class="n">ACTION</span><span class="p">:</span> <span class="n">GET_CONTACTS</span><span class="p">,</span>
+            <span class="n">TIME</span><span class="p">:</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">(),</span>
+            <span class="n">USER</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">username</span>
+        <span class="p">}</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;Сформирован запрос </span><span class="si">{</span><span class="n">req</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
+        <span class="k">with</span> <span class="n">socket_lock</span><span class="p">:</span>
+            <span class="n">send_message</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">transport</span><span class="p">,</span> <span class="n">req</span><span class="p">)</span>
+            <span class="n">ans</span> <span class="o">=</span> <span class="n">get_message</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">transport</span><span class="p">)</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;Получен ответ </span><span class="si">{</span><span class="n">ans</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">RESPONSE</span> <span class="ow">in</span> <span class="n">ans</span> <span class="ow">and</span> <span class="n">ans</span><span class="p">[</span><span class="n">RESPONSE</span><span class="p">]</span> <span class="o">==</span> <span class="mi">202</span><span class="p">:</span>
+            <span class="k">for</span> <span class="n">contact</span> <span class="ow">in</span> <span class="n">ans</span><span class="p">[</span><span class="n">LIST_INFO</span><span class="p">]:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">database</span><span class="o">.</span><span class="n">add_contact</span><span class="p">(</span><span class="n">contact</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="s1">&#39;Не удалось обновить список контактов.&#39;</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="ClientTransport.user_list_update"><a class="viewcode-back" href="../../client.html#client.transport.ClientTransport.user_list_update">[docs]</a>    <span class="k">def</span> <span class="nf">user_list_update</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Метод обновляющий с сервера список пользователей.&quot;&quot;&quot;</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;Запрос списка известных пользователей </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">username</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
+        <span class="n">req</span> <span class="o">=</span> <span class="p">{</span>
+            <span class="n">ACTION</span><span class="p">:</span> <span class="n">USERS_REQUEST</span><span class="p">,</span>
+            <span class="n">TIME</span><span class="p">:</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">(),</span>
+            <span class="n">ACCOUNT_NAME</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">username</span>
+        <span class="p">}</span>
+        <span class="k">with</span> <span class="n">socket_lock</span><span class="p">:</span>
+            <span class="n">send_message</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">transport</span><span class="p">,</span> <span class="n">req</span><span class="p">)</span>
+            <span class="n">ans</span> <span class="o">=</span> <span class="n">get_message</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">transport</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">RESPONSE</span> <span class="ow">in</span> <span class="n">ans</span> <span class="ow">and</span> <span class="n">ans</span><span class="p">[</span><span class="n">RESPONSE</span><span class="p">]</span> <span class="o">==</span> <span class="mi">202</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">database</span><span class="o">.</span><span class="n">add_users</span><span class="p">(</span><span class="n">ans</span><span class="p">[</span><span class="n">LIST_INFO</span><span class="p">])</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="s1">&#39;Не удалось обновить список известных пользователей.&#39;</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="ClientTransport.key_request"><a class="viewcode-back" href="../../client.html#client.transport.ClientTransport.key_request">[docs]</a>    <span class="k">def</span> <span class="nf">key_request</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">user</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Метод запрашивающий с сервера публичный ключ пользователя.&quot;&quot;&quot;</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;Запрос публичного ключа для </span><span class="si">{</span><span class="n">user</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
+        <span class="n">req</span> <span class="o">=</span> <span class="p">{</span>
+            <span class="n">ACTION</span><span class="p">:</span> <span class="n">PUBLIC_KEY_REQUEST</span><span class="p">,</span>
+            <span class="n">TIME</span><span class="p">:</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">(),</span>
+            <span class="n">ACCOUNT_NAME</span><span class="p">:</span> <span class="n">user</span>
+        <span class="p">}</span>
+        <span class="k">with</span> <span class="n">socket_lock</span><span class="p">:</span>
+            <span class="n">send_message</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">transport</span><span class="p">,</span> <span class="n">req</span><span class="p">)</span>
+            <span class="n">ans</span> <span class="o">=</span> <span class="n">get_message</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">transport</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">RESPONSE</span> <span class="ow">in</span> <span class="n">ans</span> <span class="ow">and</span> <span class="n">ans</span><span class="p">[</span><span class="n">RESPONSE</span><span class="p">]</span> <span class="o">==</span> <span class="mi">511</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">ans</span><span class="p">[</span><span class="n">DATA</span><span class="p">]</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;Не удалось получить ключ собеседника</span><span class="si">{</span><span class="n">user</span><span class="si">}</span><span class="s1">.&#39;</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="ClientTransport.add_contact"><a class="viewcode-back" href="../../client.html#client.transport.ClientTransport.add_contact">[docs]</a>    <span class="k">def</span> <span class="nf">add_contact</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">contact</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Метод отправляющий на сервер сведения о добавлении контакта.&quot;&quot;&quot;</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;Создание контакта </span><span class="si">{</span><span class="n">contact</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
+        <span class="n">req</span> <span class="o">=</span> <span class="p">{</span>
+            <span class="n">ACTION</span><span class="p">:</span> <span class="n">ADD_CONTACT</span><span class="p">,</span>
+            <span class="n">TIME</span><span class="p">:</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">(),</span>
+            <span class="n">USER</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">username</span><span class="p">,</span>
+            <span class="n">ACCOUNT_NAME</span><span class="p">:</span> <span class="n">contact</span>
+        <span class="p">}</span>
+        <span class="k">with</span> <span class="n">socket_lock</span><span class="p">:</span>
+            <span class="n">send_message</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">transport</span><span class="p">,</span> <span class="n">req</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">process_server_ans</span><span class="p">(</span><span class="n">get_message</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">transport</span><span class="p">))</span></div>
+
+<div class="viewcode-block" id="ClientTransport.remove_contact"><a class="viewcode-back" href="../../client.html#client.transport.ClientTransport.remove_contact">[docs]</a>    <span class="k">def</span> <span class="nf">remove_contact</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">contact</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Метод отправляющий на сервер сведения о удалении контакта.&quot;&quot;&quot;</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;Удаление контакта </span><span class="si">{</span><span class="n">contact</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
+        <span class="n">req</span> <span class="o">=</span> <span class="p">{</span>
+            <span class="n">ACTION</span><span class="p">:</span> <span class="n">REMOVE_CONTACT</span><span class="p">,</span>
+            <span class="n">TIME</span><span class="p">:</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">(),</span>
+            <span class="n">USER</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">username</span><span class="p">,</span>
+            <span class="n">ACCOUNT_NAME</span><span class="p">:</span> <span class="n">contact</span>
+        <span class="p">}</span>
+        <span class="k">with</span> <span class="n">socket_lock</span><span class="p">:</span>
+            <span class="n">send_message</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">transport</span><span class="p">,</span> <span class="n">req</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">process_server_ans</span><span class="p">(</span><span class="n">get_message</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">transport</span><span class="p">))</span></div>
+
+<div class="viewcode-block" id="ClientTransport.transport_shutdown"><a class="viewcode-back" href="../../client.html#client.transport.ClientTransport.transport_shutdown">[docs]</a>    <span class="k">def</span> <span class="nf">transport_shutdown</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Метод уведомляющий сервер о завершении работы клиента.&quot;&quot;&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">running</span> <span class="o">=</span> <span class="kc">False</span>
+        <span class="n">message</span> <span class="o">=</span> <span class="p">{</span>
+            <span class="n">ACTION</span><span class="p">:</span> <span class="n">EXIT</span><span class="p">,</span>
+            <span class="n">TIME</span><span class="p">:</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">(),</span>
+            <span class="n">ACCOUNT_NAME</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">username</span>
+        <span class="p">}</span>
+        <span class="k">with</span> <span class="n">socket_lock</span><span class="p">:</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="n">send_message</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">transport</span><span class="p">,</span> <span class="n">message</span><span class="p">)</span>
+            <span class="k">except</span> <span class="ne">OSError</span><span class="p">:</span>
+                <span class="k">pass</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s1">&#39;Транспорт завершает работу.&#39;</span><span class="p">)</span>
+        <span class="n">time</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="mf">0.5</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="ClientTransport.send_message"><a class="viewcode-back" href="../../client.html#client.transport.ClientTransport.send_message">[docs]</a>    <span class="k">def</span> <span class="nf">send_message</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">to</span><span class="p">,</span> <span class="n">message</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Метод отправляющий на сервер сообщения для пользователя.&quot;&quot;&quot;</span>
+        <span class="n">message_dict</span> <span class="o">=</span> <span class="p">{</span>
+            <span class="n">ACTION</span><span class="p">:</span> <span class="n">MESSAGE</span><span class="p">,</span>
+            <span class="n">SENDER</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">username</span><span class="p">,</span>
+            <span class="n">DESTINATION</span><span class="p">:</span> <span class="n">to</span><span class="p">,</span>
+            <span class="n">TIME</span><span class="p">:</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">(),</span>
+            <span class="n">MESSAGE_TEXT</span><span class="p">:</span> <span class="n">message</span>
+        <span class="p">}</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;Сформирован словарь сообщения: </span><span class="si">{</span><span class="n">message_dict</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
+
+        <span class="c1"># Необходимо дождаться освобождения сокета для отправки сообщения</span>
+        <span class="k">with</span> <span class="n">socket_lock</span><span class="p">:</span>
+            <span class="n">send_message</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">transport</span><span class="p">,</span> <span class="n">message_dict</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">process_server_ans</span><span class="p">(</span><span class="n">get_message</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">transport</span><span class="p">))</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;Отправлено сообщение для пользователя </span><span class="si">{</span><span class="n">to</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="ClientTransport.run"><a class="viewcode-back" href="../../client.html#client.transport.ClientTransport.run">[docs]</a>    <span class="k">def</span> <span class="nf">run</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Метод содержащий основной цикл работы транспортного потока.&quot;&quot;&quot;</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s1">&#39;Запущен процесс - приёмник собщений с сервера.&#39;</span><span class="p">)</span>
+        <span class="k">while</span> <span class="bp">self</span><span class="o">.</span><span class="n">running</span><span class="p">:</span>
+            <span class="n">time</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
+            <span class="n">message</span> <span class="o">=</span> <span class="kc">None</span>
+            <span class="k">with</span> <span class="n">socket_lock</span><span class="p">:</span>
+                <span class="k">try</span><span class="p">:</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">transport</span><span class="o">.</span><span class="n">settimeout</span><span class="p">(</span><span class="mf">0.5</span><span class="p">)</span>
+                    <span class="n">message</span> <span class="o">=</span> <span class="n">get_message</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">transport</span><span class="p">)</span>
+                <span class="k">except</span> <span class="ne">OSError</span> <span class="k">as</span> <span class="n">err</span><span class="p">:</span>
+                    <span class="k">if</span> <span class="n">err</span><span class="o">.</span><span class="n">errno</span><span class="p">:</span>
+                        <span class="n">logger</span><span class="o">.</span><span class="n">critical</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;Потеряно соединение с сервером.&#39;</span><span class="p">)</span>
+                        <span class="bp">self</span><span class="o">.</span><span class="n">running</span> <span class="o">=</span> <span class="kc">False</span>
+                        <span class="bp">self</span><span class="o">.</span><span class="n">connection_lost</span><span class="o">.</span><span class="n">emit</span><span class="p">()</span>
+                <span class="c1"># Проблемы с соединением</span>
+                <span class="k">except</span> <span class="p">(</span><span class="ne">ConnectionError</span><span class="p">,</span> <span class="ne">ConnectionAbortedError</span><span class="p">,</span> <span class="ne">ConnectionResetError</span><span class="p">,</span> <span class="n">json</span><span class="o">.</span><span class="n">JSONDecodeError</span><span class="p">,</span> <span class="ne">TypeError</span><span class="p">):</span>
+                    <span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;Потеряно соединение с сервером.&#39;</span><span class="p">)</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">running</span> <span class="o">=</span> <span class="kc">False</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">connection_lost</span><span class="o">.</span><span class="n">emit</span><span class="p">()</span>
+                <span class="k">finally</span><span class="p">:</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">transport</span><span class="o">.</span><span class="n">settimeout</span><span class="p">(</span><span class="mi">5</span><span class="p">)</span>
+
+            <span class="k">if</span> <span class="n">message</span><span class="p">:</span>
+                <span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;Принято сообщение с сервера: </span><span class="si">{</span><span class="n">message</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">process_server_ans</span><span class="p">(</span><span class="n">message</span><span class="p">)</span></div></div>
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2021, Anatolii Tsirkunenko.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>
