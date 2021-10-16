@@ -3,9 +3,9 @@ from cx_Freeze import setup, Executable
 build_exe_options = {
     'packages': ['common', 'logs', 'server', 'unit_tests'],
 }
-setup(name='messenger_server',
+setup(name='gb_messenger_server',
       version='0.0.1',
-      description='messenger_server',
+      description='gb_messenger_server',
       options={
           'build_exe': build_exe_options
       },
